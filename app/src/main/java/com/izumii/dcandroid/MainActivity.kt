@@ -4,8 +4,10 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
+import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.CookieManager
@@ -36,6 +38,9 @@ class MainActivity : AppCompatActivity() {
     private var webView: KeepAliveWebView? = null
     private var bridge: WebAppInterface? = null
     private var backPressedTime: Long = 0
+
+    private var customView: View? = null
+    private var customViewCallback: WebChromeClient.CustomViewCallback? = null
 
     private var recentCrashCount = 0
     private var lastCrashTime = 0L
@@ -129,6 +134,17 @@ class MainActivity : AppCompatActivity() {
                     s.innerHTML = '[class*="notice"], [class*="downloadNotice"], [class*="mobileAppPromo"] { display: none !important; }';
                     document.head.appendChild(s);
                 }
+
+                // 7. Continuous Anti-AFK activity pulse (prevents auto-disconnect from voice & streams)
+                if (!window._dcAfkInterval) {
+                    window._dcAfkInterval = setInterval(function() {
+                        try {
+                            const evt = new MouseEvent('mousemove', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 });
+                            window.dispatchEvent(evt);
+                            document.dispatchEvent(evt);
+                        } catch(e) {}
+                    }, 45000);
+                }
             })();
         """
     }
@@ -154,6 +170,9 @@ class MainActivity : AppCompatActivity() {
         setupDoubleTapBackToExit()
         setupWebView()
 
+        // Direct hardware volume keys to control stream/voice audio volume
+        volumeControlStream = AudioManager.STREAM_MUSIC
+
         // Keep screen awake while watching streams or in voice channels
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
@@ -176,6 +195,11 @@ class MainActivity : AppCompatActivity() {
     private fun setupDoubleTapBackToExit() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (customView != null) {
+                    hideCustomView()
+                    return
+                }
+
                 val wv = webView
                 if (wv != null && wv.canGoBack()) {
                     val currentUrl = wv.url ?: ""
@@ -195,6 +219,16 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    private fun hideCustomView() {
+        val cv = customView ?: return
+        rootContainer.removeView(cv)
+        customView = null
+        customViewCallback?.onCustomViewHidden()
+        customViewCallback = null
+        webView?.visibility = View.VISIBLE
+        setupImmersiveFullscreen()
     }
 
     private fun openExternalChooser(url: String): Boolean {
@@ -258,6 +292,7 @@ class MainActivity : AppCompatActivity() {
         settings.allowFileAccess = true
         settings.safeBrowsingEnabled = false
         settings.setGeolocationEnabled(false)
+        settings.javaScriptCanOpenWindowsAutomatically = true
 
         // Essential: Spoof desktop user agent so Discord loads the web app interface
         settings.userAgentString = DESKTOP_USER_AGENT
@@ -346,15 +381,46 @@ class MainActivity : AppCompatActivity() {
                     false
                 }
             }
+
+            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                if (customView != null) {
+                    hideCustomView()
+                    return
+                }
+                customView = view
+                customViewCallback = callback
+                webView?.visibility = View.GONE
+                rootContainer.addView(
+                    view,
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                )
+                setupImmersiveFullscreen()
+            }
+
+            override fun onHideCustomView() {
+                hideCustomView()
+            }
         }
 
         v.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
-                val url = request?.url?.toString() ?: return false
+                request ?: return false
+                if (!request.isForMainFrame) {
+                    return false
+                }
+
+                val url = request.url.toString()
+                if (url.startsWith("blob:") || url.startsWith("data:") || url.startsWith("about:") || url.startsWith("javascript:")) {
+                    return false
+                }
+
                 val host = request.url.host ?: ""
 
                 // Allow internal Discord domains to stay inside the WebView
-                if (host.endsWith("discord.com") || host.endsWith("discordapp.com") || host.endsWith("discord.gg")) {
+                if (host.endsWith("discord.com") || host.endsWith("discordapp.com") || host.endsWith("discord.gg") || host.endsWith("discordapp.net")) {
                     return false
                 }
 
@@ -461,6 +527,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        hideCustomView()
         fileUploadCallback?.onReceiveValue(null)
         fileUploadCallback = null
         ConnectionKeeperService.onPulseListener = null

@@ -15,7 +15,7 @@ class DiscordTitleParserTest {
     }
 
     private fun isDiscordHost(host: String): Boolean {
-        return host.endsWith("discord.com") || host.endsWith("discordapp.com") || host.endsWith("discord.gg")
+        return host.endsWith("discord.com") || host.endsWith("discordapp.com") || host.endsWith("discord.gg") || host.endsWith("discordapp.net")
     }
 
     @Test
@@ -32,6 +32,7 @@ class DiscordTitleParserTest {
         assertTrue(isDiscordHost("discord.com"))
         assertTrue(isDiscordHost("canary.discord.com"))
         assertTrue(isDiscordHost("cdn.discordapp.com"))
+        assertTrue(isDiscordHost("media.discordapp.net"))
         assertTrue(isDiscordHost("discord.gg"))
         assertFalse(isDiscordHost("youtube.com"))
         assertFalse(isDiscordHost("google.com"))
