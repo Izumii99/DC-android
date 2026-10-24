@@ -14,23 +14,17 @@ android {
         versionCode = 1
         versionName = "1.0.0"
 
+        manifestPlaceholders["appName"] = "DC"
+        manifestPlaceholders["appIcon"] = "@drawable/ic_discord_logo"
+        manifestPlaceholders["roundIcon"] = "@drawable/ic_discord_logo"
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    flavorDimensions += "mode"
-    productFlavors {
-        create("standard") {
-            dimension = "mode"
-            manifestPlaceholders["appName"] = "DC Android"
-            manifestPlaceholders["appIcon"] = "@drawable/ic_discord_logo"
-            manifestPlaceholders["roundIcon"] = "@drawable/ic_discord_logo"
-        }
-        create("discreet") {
-            dimension = "mode"
-            applicationIdSuffix = ".discreet"
-            manifestPlaceholders["appName"] = "DC"
-            manifestPlaceholders["appIcon"] = "@drawable/ic_transparent"
-            manifestPlaceholders["roundIcon"] = "@drawable/ic_transparent"
+    applicationVariants.all {
+        outputs.all {
+            val output = this as? com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            output?.outputFileName = "DC.apk"
         }
     }
 

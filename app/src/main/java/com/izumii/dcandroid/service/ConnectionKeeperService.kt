@@ -49,15 +49,13 @@ class ConnectionKeeperService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
             )
 
-            val isDiscreet = context.packageName.contains("discreet")
-            val baseTitle = if (isDiscreet) "DC" else "DC Android"
-            val title = if (unreadCount > 0) "$baseTitle ($unreadCount)" else (if (isDiscreet) baseTitle else context.getString(R.string.service_running_title))
+            val title = if (unreadCount > 0) "DC ($unreadCount)" else context.getString(R.string.service_running_title)
             val text = if (unreadCount > 0) {
-                if (isDiscreet) "$unreadCount new message${if (unreadCount > 1) "s" else ""}" else "$unreadCount new mention${if (unreadCount > 1) "s" else ""}"
+                "$unreadCount new mention${if (unreadCount > 1) "s" else ""}"
             } else {
-                if (isDiscreet) "Active session" else context.getString(R.string.service_running_desc)
+                context.getString(R.string.service_running_desc)
             }
-            val icon = if (isDiscreet) R.drawable.ic_transparent else R.drawable.ic_discord_logo
+            val icon = R.drawable.ic_discord_logo
 
             return NotificationCompat.Builder(context, CHANNEL_ID)
                 .setContentTitle(title)
@@ -90,14 +88,10 @@ class ConnectionKeeperService : Service() {
                 launchIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
             )
-            val isDiscreet = context.packageName.contains("discreet")
-            val displayTitle = if (isDiscreet) "DC" else title
-            val icon = if (isDiscreet) R.drawable.ic_transparent else R.drawable.ic_discord_logo
-
             val notif = NotificationCompat.Builder(context, CHAT_CHANNEL_ID)
-                .setContentTitle(displayTitle)
+                .setContentTitle(title)
                 .setContentText(message)
-                .setSmallIcon(icon)
+                .setSmallIcon(R.drawable.ic_discord_logo)
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setContentIntent(pendingIntent)

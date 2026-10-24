@@ -19,9 +19,9 @@
     <application
         android:name=".DCApplication"
         android:allowBackup="true"
-        android:icon="${appIcon}"
-        android:label="${appName}"
-        android:roundIcon="${roundIcon}"
+        android:icon="@drawable/ic_discord_logo"
+        android:label="DC"
+        android:roundIcon="@drawable/ic_discord_logo"
         android:supportsRtl="true"
         android:hardwareAccelerated="true"
         android:largeHeap="true"
