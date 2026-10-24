@@ -13,12 +13,13 @@ object MemoryOptimizer {
             if (!document.getElementById('dc-bg-style')) {
                 const style = document.createElement('style');
                 style.id = 'dc-bg-style';
-                style.innerHTML = '* { animation: none !important; transition: none !important; } video, canvas, img[src*=".gif"], [class*="animator"], [class*="mediaAttachments"], [class*="gif"], [class*="avatarDecoration"], [class*="profileEffects"], [class*="typing"] { display: none !important; }';
+                style.innerHTML = '* { animation: none !important; transition: none !important; } canvas, img[src*=".gif"], [class*="animator"], [class*="mediaAttachments"], [class*="gif"], [class*="avatarDecoration"], [class*="profileEffects"], [class*="typing"] { display: none !important; } video { opacity: 0.01 !important; }';
                 document.head.appendChild(style);
             }
             try {
                 const videos = document.querySelectorAll('video');
                 for (let i = 0; i < videos.length; i++) {
+                    if (videos[i].srcObject) continue;
                     if (!videos[i].paused) {
                         videos[i]._dcWasPlaying = true;
                         videos[i].pause();
@@ -52,6 +53,7 @@ object MemoryOptimizer {
             try {
                 const videos = document.querySelectorAll('video');
                 for (let i = 0; i < videos.length; i++) {
+                    if (videos[i].srcObject) continue;
                     if (videos[i]._dcWasPlaying) {
                         videos[i]._dcWasPlaying = false;
                         videos[i].play().catch(function() {});
@@ -75,11 +77,7 @@ object MemoryOptimizer {
         webView ?: return
         when (level) {
             ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL,
-            ComponentCallbacks2.TRIM_MEMORY_COMPLETE,
-            ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW,
-            ComponentCallbacks2.TRIM_MEMORY_MODERATE,
-            ComponentCallbacks2.TRIM_MEMORY_BACKGROUND,
-            ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> {
+            ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> {
                 try {
                     webView.clearCache(false)
                     webView.evaluateJavascript("if (typeof window.gc === 'function') { try { window.gc(); } catch(e) {} }", null)

@@ -24,8 +24,7 @@ import java.io.FileOutputStream
 import java.util.concurrent.Executors
 
 class WebAppInterface(
-    private val context: Context,
-    private val onZoomStateChanged: ((Boolean) -> Unit)? = null
+    private val context: Context
 ) {
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -53,13 +52,6 @@ class WebAppInterface(
     @JavascriptInterface
     fun getAppVersion(): String {
         return BuildConfig.VERSION_NAME
-    }
-
-    @JavascriptInterface
-    fun setZoomEnabled(enabled: Boolean) {
-        mainHandler.post {
-            onZoomStateChanged?.invoke(enabled)
-        }
     }
 
     @JavascriptInterface

@@ -25,6 +25,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.izumii.dcandroid.memory.MemoryOptimizer
 import com.izumii.dcandroid.service.ConnectionKeeperService
 
@@ -53,6 +55,82 @@ class MainActivity : AppCompatActivity() {
         const val DISCORD_APP_URL = "https://discord.com/app"
         // Desktop User-Agent prevents Discord from redirecting to mobile play store splash
         const val DESKTOP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+
+        const val DISCORD_INJECTION_SCRIPT = """
+            (function() {
+                // 1. Web Audio Context keep-alive hook
+                if (!window._dcAudioCtxHooked) {
+                    window._dcAudioCtxHooked = true;
+                    const orig = window.AudioContext || window.webkitAudioContext;
+                    if (orig) {
+                        window.AudioContext = function() {
+                            const ctx = new orig();
+                            window._dcAudioCtx = ctx;
+                            return ctx;
+                        };
+                        window.AudioContext.prototype = orig.prototype;
+                    }
+                }
+
+                // 2. Unconditionally overwrite HTML5 Notification polyfill
+                window.Notification = function(title, options) {
+                    this.title = title || 'Discord';
+                    this.body = (options && options.body) || '';
+                    this.onclick = null;
+                    this.onclose = null;
+                    if (window.AndroidBridge && typeof window.AndroidBridge.postNotification === 'function') {
+                        window.AndroidBridge.postNotification(this.title, this.body);
+                    }
+                };
+                window.Notification.prototype.close = function() {
+                    if (typeof this.onclose === 'function') {
+                        try { this.onclose(); } catch(e) {}
+                    }
+                };
+                window.Notification.prototype.addEventListener = function(type, listener) {
+                    if (type === 'click') this.onclick = listener;
+                    if (type === 'close') this.onclose = listener;
+                };
+                window.Notification.prototype.removeEventListener = function(type, listener) {
+                    if (type === 'click' && this.onclick === listener) this.onclick = null;
+                    if (type === 'close' && this.onclose === listener) this.onclose = null;
+                };
+                window.Notification.permission = 'granted';
+                window.Notification.requestPermission = function() { return Promise.resolve('granted'); };
+
+                // 3. Clipboard bridge for "Copy Message / Copy Link"
+                if (!navigator.clipboard) {
+                    navigator.clipboard = {};
+                }
+                navigator.clipboard.writeText = function(text) {
+                    if (window.AndroidBridge && typeof window.AndroidBridge.copyText === 'function') {
+                        window.AndroidBridge.copyText(text || '');
+                    }
+                    return Promise.resolve();
+                };
+
+                // 4. Spoof document.hidden & visibilityState, override hasFocus for background notifications
+                try {
+                    Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: true });
+                    Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
+                } catch(e) {}
+                document.hasFocus = function() { return !window._dcIsBackground; };
+
+                // 5. Unlock pinch-to-zoom on mobile viewport
+                const vp = document.querySelector('meta[name="viewport"]');
+                if (vp) {
+                    vp.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes');
+                }
+
+                // 6. Suppress nagging mobile app promo notices
+                if (!document.getElementById('dc-mobile-style')) {
+                    const s = document.createElement('style');
+                    s.id = 'dc-mobile-style';
+                    s.innerHTML = '[class*="notice"], [class*="downloadNotice"], [class*="mobileAppPromo"] { display: none !important; }';
+                    document.head.appendChild(s);
+                }
+            })();
+        """
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -150,15 +228,7 @@ class MainActivity : AppCompatActivity() {
         }
         webView = v
 
-        val jsBridge = WebAppInterface(
-            context = this,
-            onZoomStateChanged = { enabled ->
-                webView?.let { wv ->
-                    wv.settings.setSupportZoom(enabled)
-                    wv.settings.builtInZoomControls = enabled
-                }
-            }
-        )
+        val jsBridge = WebAppInterface(context = this)
         bridge = jsBridge
         v.addJavascriptInterface(jsBridge, "AndroidBridge")
 
@@ -188,6 +258,15 @@ class MainActivity : AppCompatActivity() {
 
         // Essential: Spoof desktop user agent so Discord loads the web app interface
         settings.userAgentString = DESKTOP_USER_AGENT
+
+        // Execute script as early as possible on document start
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            WebViewCompat.addDocumentStartJavaScript(
+                v,
+                DISCORD_INJECTION_SCRIPT,
+                setOf("https://discord.com", "https://*.discord.com")
+            )
+        }
 
         v.setDownloadListener { url, _, contentDisposition, mimetype, _ ->
             val guessedName = URLUtil.guessFileName(url, contentDisposition, mimetype)
@@ -283,62 +362,8 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                // Inject AudioContext hook, HTML5 Notification bridge, pinch-to-zoom unlock, and Discord mobile cleanup
-                view?.evaluateJavascript(
-                    """
-                    (function() {
-                        if (!window._dcAudioCtxHooked) {
-                            window._dcAudioCtxHooked = true;
-                            const orig = window.AudioContext || window.webkitAudioContext;
-                            if (orig) {
-                                window.AudioContext = function() {
-                                    const ctx = new orig();
-                                    window._dcAudioCtx = ctx;
-                                    return ctx;
-                                };
-                                window.AudioContext.prototype = orig.prototype;
-                            }
-                        }
-                        if (!window.Notification) {
-                            window.Notification = function(title, options) {
-                                this.title = title || 'Discord';
-                                this.body = (options && options.body) || '';
-                                this.onclick = null;
-                                this.onclose = null;
-                                if (window.AndroidBridge && typeof window.AndroidBridge.postNotification === 'function') {
-                                    window.AndroidBridge.postNotification(this.title, this.body);
-                                }
-                            };
-                            window.Notification.prototype.close = function() {
-                                if (typeof this.onclose === 'function') {
-                                    try { this.onclose(); } catch(e) {}
-                                }
-                            };
-                            window.Notification.prototype.addEventListener = function(type, listener) {
-                                if (type === 'click') this.onclick = listener;
-                                if (type === 'close') this.onclose = listener;
-                            };
-                            window.Notification.prototype.removeEventListener = function(type, listener) {
-                                if (type === 'click' && this.onclick === listener) this.onclick = null;
-                                if (type === 'close' && this.onclose === listener) this.onclose = null;
-                            };
-                            window.Notification.permission = 'granted';
-                            window.Notification.requestPermission = function() { return Promise.resolve('granted'); };
-                        }
-                        const vp = document.querySelector('meta[name="viewport"]');
-                        if (vp) {
-                            vp.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes');
-                        }
-                        if (!document.getElementById('dc-mobile-style')) {
-                            const s = document.createElement('style');
-                            s.id = 'dc-mobile-style';
-                            s.innerHTML = '[class*="notice"], [class*="downloadNotice"], [class*="mobileAppPromo"] { display: none !important; }';
-                            document.head.appendChild(s);
-                        }
-                    })();
-                    """.trimIndent(),
-                    null
-                )
+                // Execute script on page finished as well
+                view?.evaluateJavascript(DISCORD_INJECTION_SCRIPT, null)
             }
 
             override fun onRenderProcessGone(
@@ -361,11 +386,11 @@ class MainActivity : AppCompatActivity() {
                 if (recentCrashCount > 3) {
                     Toast.makeText(
                         this@MainActivity,
-                        "Excessive crashes detected. Resetting session cache...",
+                        "Excessive crashes detected. Resetting cache...",
                         Toast.LENGTH_LONG
                     ).show()
                     try {
-                        android.webkit.WebStorage.getInstance().deleteAllData()
+                        webView?.clearCache(true)
                     } catch (ignored: Exception) {}
                     recentCrashCount = 0
                 }
