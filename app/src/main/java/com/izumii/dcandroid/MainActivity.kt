@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
-import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.view.View
@@ -155,23 +154,16 @@ class MainActivity : AppCompatActivity() {
 
         rootContainer = findViewById(R.id.rootContainer)
 
-        // Request runtime permissions on Android 13+ (API 33+)
+        // Request notification permission on Android 13+ (API 33+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val permissions = mutableListOf(android.Manifest.permission.POST_NOTIFICATIONS)
-            if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                permissions.add(android.Manifest.permission.RECORD_AUDIO)
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
             }
-            requestPermissions(permissions.toTypedArray(), 101)
-        } else if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 102)
         }
 
         setupImmersiveFullscreen()
         setupDoubleTapBackToExit()
         setupWebView()
-
-        // Direct hardware volume keys to control stream/voice audio volume
-        volumeControlStream = AudioManager.STREAM_MUSIC
 
         // Keep screen awake while watching streams or in voice channels
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -333,10 +325,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         v.webChromeClient = object : WebChromeClient() {
-            // Automatically grant WebRTC camera & microphone permissions when requested by Discord
+            // Deny microphone capture so Android never enters in-call VoIP mode or triggers call volume HUD
             override fun onPermissionRequest(request: PermissionRequest?) {
+                val nonAudioResources = request?.resources?.filter {
+                    it != PermissionRequest.RESOURCE_AUDIO_CAPTURE
+                }?.toTypedArray()
                 runOnUiThread {
-                    request?.grant(request.resources)
+                    if (nonAudioResources != null && nonAudioResources.isNotEmpty()) {
+                        request.grant(nonAudioResources)
+                    } else {
+                        request?.deny()
+                    }
                 }
             }
 

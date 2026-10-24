@@ -30,8 +30,8 @@ Designed as a personal lightweight replacement for bloated mobile browsers (Chro
   - Automatically injects modern Desktop Chrome User-Agent to bypass Discord's mobile redirect and load the full Discord Web app directly.
   - Injects responsive mobile CSS tweaks to eliminate "Download the App" and "Better in App" nagging overlays.
 - **WebRTC Voice & Audio Integration:**
-  - Native handling of `RECORD_AUDIO` and `WebChromeClient.onPermissionRequest` for voice channels and video streams.
-  - Web Audio Context lifecycle hooks keep audio output and input primed without freezing when switching apps.
+  - Watch-only and listen-only WebRTC audio playback without activating VoIP Call Mode, keeping audio purely on standard media stream without intrusive call volume overlays.
+  - Web Audio Context lifecycle hooks keep audio output primed without freezing when switching apps.
   - Audio playback configured without requiring manual user touch gestures (`mediaPlaybackRequiresUserGesture = false`).
 - **Zero-Bar Immersive Edge-to-Edge:**
   - Fullscreen display with transparent status and navigation bars, reapplied seamlessly across orientation changes.
