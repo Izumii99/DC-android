@@ -6,14 +6,14 @@ import android.webkit.WebView
 
 object MemoryOptimizer {
 
-    // Throttles animations, disables WebRTC video tracks to halt GPU decoding, and pauses media when backgrounded
+    // Throttles animations, detaches heavy visual DOM trees, halts WebRTC video decoding, and pauses media when backgrounded
     private const val THROTTLE_ANIMATIONS_SCRIPT = """
         (function() {
             window._dcIsBackground = true;
             if (!document.getElementById('dc-bg-style')) {
                 const style = document.createElement('style');
                 style.id = 'dc-bg-style';
-                style.innerHTML = '[class*="animator"], [class*="animated"], [class*="avatarDecoration"], [class*="profileEffects"], [class*="typing"], img[src*=".gif"], canvas { animation: none !important; display: none !important; }';
+                style.innerHTML = '#app-mount [class*="sidebar_"], #app-mount [class*="guilds_"], #app-mount [class*="chat_"], #app-mount [class*="membersWrap_"], #app-mount [class*="banner_"], #app-mount [class*="channelTextArea_"], [class*="animator"], [class*="animated"], [class*="avatarDecoration"], [class*="profileEffects"], [class*="typing"], img[src*=".gif"], canvas { animation: none !important; display: none !important; }';
                 document.head.appendChild(style);
             }
             try {
@@ -36,7 +36,7 @@ object MemoryOptimizer {
                 window._dcOrigRAF = window.requestAnimationFrame;
                 window.requestAnimationFrame = function(cb) {
                     if (window._dcIsBackground) {
-                        return setTimeout(function() { cb(performance.now()); }, 1000);
+                        return setTimeout(function() { cb(performance.now()); }, 10000);
                     }
                     return window._dcOrigRAF(cb);
                 };
@@ -79,6 +79,9 @@ object MemoryOptimizer {
     fun onPause(webView: WebView?) {
         webView ?: return
         webView.evaluateJavascript(THROTTLE_ANIMATIONS_SCRIPT, null)
+        try {
+            webView.clearCache(false)
+        } catch (ignored: Exception) {}
     }
 
     fun onResume(webView: WebView?) {

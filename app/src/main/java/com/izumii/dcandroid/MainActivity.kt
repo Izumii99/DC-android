@@ -30,6 +30,7 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.izumii.dcandroid.memory.MemoryOptimizer
 import com.izumii.dcandroid.service.ConnectionKeeperService
+import java.io.ByteArrayInputStream
 
 class MainActivity : AppCompatActivity() {
 
@@ -62,6 +63,11 @@ class MainActivity : AppCompatActivity() {
 
         const val DISCORD_INJECTION_SCRIPT = """
             (function() {
+                // 0. Mute console chatter to stop V8 string allocations and garbage collection cycles
+                try {
+                    console.log = console.debug = console.info = console.warn = function() {};
+                } catch(e) {}
+
                 // 1. Web Audio Context keep-alive hook
                 if (!window._dcAudioCtxHooked) {
                     window._dcAudioCtxHooked = true;
@@ -126,11 +132,15 @@ class MainActivity : AppCompatActivity() {
                     vp.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes');
                 }
 
-                // 6. Suppress nagging mobile app promo notices
-                if (!document.getElementById('dc-mobile-style')) {
+                // 6. Suppress promo notices, GPU-heavy backdrop blur, and animated profile decorations
+                if (!document.getElementById('dc-perf-style')) {
                     const s = document.createElement('style');
-                    s.id = 'dc-mobile-style';
-                    s.innerHTML = '[class*="notice"], [class*="downloadNotice"], [class*="mobileAppPromo"] { display: none !important; }';
+                    s.id = 'dc-perf-style';
+                    s.innerHTML = `
+                        [class*="notice"], [class*="downloadNotice"], [class*="mobileAppPromo"] { display: none !important; }
+                        * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+                        [class*="avatarDecoration"], [class*="profileEffects"] { display: none !important; }
+                    `;
                     document.head.appendChild(s);
                 }
 
@@ -313,6 +323,7 @@ class MainActivity : AppCompatActivity() {
         settings.safeBrowsingEnabled = false
         settings.setGeolocationEnabled(false)
         settings.javaScriptCanOpenWindowsAutomatically = true
+        settings.offscreenPreRaster = false
 
         // Essential: Spoof desktop user agent so Discord loads the web app interface
         settings.userAgentString = DESKTOP_USER_AGENT
@@ -449,6 +460,21 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
 
+            override fun shouldInterceptRequest(
+                view: WebView?,
+                request: android.webkit.WebResourceRequest?
+            ): android.webkit.WebResourceResponse? {
+                val url = request?.url?.toString() ?: return null
+                if (url.contains("/api/v9/science") ||
+                    url.contains("/api/v9/metrics") ||
+                    url.contains("sentry.io") ||
+                    url.contains("tracking.discord.gg")
+                ) {
+                    return android.webkit.WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
+                }
+                return super.shouldInterceptRequest(view, request)
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 // Execute script on page finished as well
@@ -526,7 +552,22 @@ class MainActivity : AppCompatActivity() {
         ConnectionKeeperService.onPulseListener = {
             webView?.post {
                 webView?.evaluateJavascript(
-                    "try { if (window._dcAudioCtx && window._dcAudioCtx.state === 'suspended') window._dcAudioCtx.resume(); window.dispatchEvent(new Event('mousemove')); } catch(e){}",
+                    """
+                    try {
+                        if (window._dcAudioCtx && window._dcAudioCtx.state === 'suspended') window._dcAudioCtx.resume();
+                        window.dispatchEvent(new Event('mousemove'));
+                        if (window._dcIsBackground) {
+                            const vids = document.querySelectorAll('video');
+                            for (let i = 0; i < vids.length; i++) {
+                                const s = vids[i].srcObject;
+                                if (s && s.getVideoTracks) {
+                                    const ts = s.getVideoTracks();
+                                    for (let j = 0; j < ts.length; j++) ts[j].enabled = false;
+                                }
+                            }
+                        }
+                    } catch(e){}
+                    """.trimIndent(),
                     null
                 )
             }

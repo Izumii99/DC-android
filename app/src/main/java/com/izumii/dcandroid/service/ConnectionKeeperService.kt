@@ -10,7 +10,6 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.izumii.dcandroid.MainActivity
 import com.izumii.dcandroid.R
@@ -27,7 +26,6 @@ import kotlinx.coroutines.launch
  */
 class ConnectionKeeperService : Service() {
 
-    private var wakeLock: PowerManager.WakeLock? = null
     private var pulseJob: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
 
@@ -123,11 +121,6 @@ class ConnectionKeeperService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-
-        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
-        wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "DCAndroid:ConnectionKeeperWakeLock")?.apply {
-            setReferenceCounted(false)
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -140,14 +133,13 @@ class ConnectionKeeperService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
 
-        // Periodic keep-alive pulse to maintain WebSocket and background timers
-        // Briefly holds wake lock for 2s only during pulse so SoC CPU can enter deep sleep
+        // Periodic keep-alive pulse to maintain WebSocket and Anti-AFK activity
+        // Zero wake locks held: allows CPU cores to drop to deep sleep C-states
         pulseJob?.cancel()
         pulseJob = serviceScope.launch {
             while (isActive) {
-                delay(40_000L)
+                delay(42_000L)
                 try {
-                    wakeLock?.acquire(2_000L)
                     onPulseListener?.invoke()
                 } catch (ignored: Exception) {}
             }
@@ -162,12 +154,6 @@ class ConnectionKeeperService : Service() {
         pulseJob?.cancel()
         pulseJob = null
         onPulseListener = null
-
-        try {
-            if (wakeLock?.isHeld == true) wakeLock?.release()
-        } catch (ignored: Exception) {}
-        wakeLock = null
-
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
