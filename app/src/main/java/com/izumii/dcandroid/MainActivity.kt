@@ -498,19 +498,22 @@ class MainActivity : AppCompatActivity() {
                 MemoryOptimizer.destroyWebView(webView)
                 webView = null
 
-                if (recentCrashCount > 3) {
+                val shouldClearCache = recentCrashCount > 3
+                if (shouldClearCache) {
                     Toast.makeText(
                         this@MainActivity,
                         "Excessive crashes detected. Resetting cache...",
                         Toast.LENGTH_LONG
                     ).show()
-                    try {
-                        webView?.clearCache(true)
-                    } catch (ignored: Exception) {}
                     recentCrashCount = 0
                 }
 
                 setupWebView()
+                if (shouldClearCache) {
+                    try {
+                        webView?.clearCache(true)
+                    } catch (ignored: Exception) {}
+                }
                 webView?.loadUrl(DISCORD_APP_URL)
                 return true
             }
