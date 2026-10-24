@@ -144,6 +144,30 @@ class MainActivity : AppCompatActivity() {
                         } catch(e) {}
                     }, 45000);
                 }
+
+                // 8. Disable microphone hardware capture (forces pure watch/listen mode, stops VoIP Call mode)
+                try {
+                    if (navigator.mediaDevices) {
+                        if (navigator.mediaDevices.getUserMedia) {
+                            navigator.mediaDevices.getUserMedia = function(c) {
+                                if (c && c.audio) {
+                                    return Promise.reject(new DOMException("Microphone disabled", "NotAllowedError"));
+                                }
+                                return Promise.reject(new DOMException("Device not supported", "NotFoundError"));
+                            };
+                        }
+                        if (navigator.mediaDevices.enumerateDevices) {
+                            const origEnumerate = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
+                            navigator.mediaDevices.enumerateDevices = function() {
+                                return origEnumerate().then(function(devices) {
+                                    return devices.filter(function(d) { return d.kind !== 'audioinput'; });
+                                });
+                            };
+                        }
+                    }
+                    navigator.getUserMedia = undefined;
+                    navigator.webkitGetUserMedia = undefined;
+                } catch(e) {}
             })();
         """
     }
@@ -164,6 +188,10 @@ class MainActivity : AppCompatActivity() {
         setupImmersiveFullscreen()
         setupDoubleTapBackToExit()
         setupWebView()
+
+        // Keep audio system strictly in normal media mode, never in-call VoIP mode
+        (getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager)?.mode =
+            android.media.AudioManager.MODE_NORMAL
 
         // Keep screen awake while watching streams or in voice channels
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -325,17 +353,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         v.webChromeClient = object : WebChromeClient() {
-            // Deny microphone capture so Android never enters in-call VoIP mode or triggers call volume HUD
+            // Deny device hardware capture requests (microphone/camera) to prevent VoIP mode
             override fun onPermissionRequest(request: PermissionRequest?) {
-                val nonAudioResources = request?.resources?.filter {
-                    it != PermissionRequest.RESOURCE_AUDIO_CAPTURE
-                }?.toTypedArray()
                 runOnUiThread {
-                    if (nonAudioResources != null && nonAudioResources.isNotEmpty()) {
-                        request.grant(nonAudioResources)
-                    } else {
-                        request?.deny()
-                    }
+                    request?.deny()
                 }
             }
 
@@ -479,6 +500,8 @@ class MainActivity : AppCompatActivity() {
         ConnectionKeeperService.onPulseListener = null
         ConnectionKeeperService.stop(this)
         ConnectionKeeperService.updateBadgeCount(this, 0)
+        (getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager)?.mode =
+            android.media.AudioManager.MODE_NORMAL
 
         // Resume AudioContext if suspended
         webView?.evaluateJavascript(
@@ -491,6 +514,8 @@ class MainActivity : AppCompatActivity() {
         isAppInForeground = false
         webView?.keepAliveInBackground = true
         super.onPause()
+        (getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager)?.mode =
+            android.media.AudioManager.MODE_NORMAL
         try {
             CookieManager.getInstance().flush()
         } catch (ignored: Exception) {}
