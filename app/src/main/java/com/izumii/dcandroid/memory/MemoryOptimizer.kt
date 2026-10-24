@@ -13,7 +13,7 @@ object MemoryOptimizer {
             if (!document.getElementById('dc-bg-style')) {
                 const style = document.createElement('style');
                 style.id = 'dc-bg-style';
-                style.innerHTML = '* { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } video, canvas, img[src*=".gif"], [class*="animator"], [class*="mediaAttachments"], [class*="gif"] { visibility: hidden !important; }';
+                style.innerHTML = '* { animation: none !important; transition: none !important; } video, canvas, img[src*=".gif"], [class*="animator"], [class*="mediaAttachments"], [class*="gif"], [class*="avatarDecoration"], [class*="profileEffects"], [class*="typing"] { display: none !important; }';
                 document.head.appendChild(style);
             }
             try {
