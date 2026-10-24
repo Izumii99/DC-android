@@ -154,6 +154,9 @@ class MainActivity : AppCompatActivity() {
         setupDoubleTapBackToExit()
         setupWebView()
 
+        // Keep screen awake while watching streams or in voice channels
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         webView?.loadUrl(DISCORD_APP_URL)
     }
 
@@ -427,11 +430,11 @@ class MainActivity : AppCompatActivity() {
             CookieManager.getInstance().flush()
         } catch (ignored: Exception) {}
         MemoryOptimizer.onPause(webView)
-        // Keep WebSocket Gateway and AudioContext primed during background
+        // Keep WebSocket Gateway, AudioContext, and Anti-AFK activity primed during background
         ConnectionKeeperService.onPulseListener = {
             webView?.post {
                 webView?.evaluateJavascript(
-                    "try { if (window._dcAudioCtx && window._dcAudioCtx.state === 'suspended') window._dcAudioCtx.resume(); } catch(e){}",
+                    "try { if (window._dcAudioCtx && window._dcAudioCtx.state === 'suspended') window._dcAudioCtx.resume(); window.dispatchEvent(new Event('mousemove')); } catch(e){}",
                     null
                 )
             }
