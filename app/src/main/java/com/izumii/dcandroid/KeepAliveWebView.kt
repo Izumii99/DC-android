@@ -20,10 +20,7 @@ class KeepAliveWebView : WebView {
     var keepAliveInBackground = false
 
     override fun onWindowVisibilityChanged(visibility: Int) {
-        if (keepAliveInBackground && visibility != View.VISIBLE) {
-            super.onWindowVisibilityChanged(View.VISIBLE)
-        } else {
-            super.onWindowVisibilityChanged(visibility)
-        }
+        // Allow Chromium to pause UI compositing while in background to save GPU/CPU power
+        super.onWindowVisibilityChanged(visibility)
     }
 }

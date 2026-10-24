@@ -127,7 +127,6 @@ class ConnectionKeeperService : Service() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
         wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "DCAndroid:ConnectionKeeperWakeLock")?.apply {
             setReferenceCounted(false)
-            acquire(24 * 60 * 60 * 1000L) // 24-hour ceiling
         }
     }
 
@@ -142,11 +141,13 @@ class ConnectionKeeperService : Service() {
         }
 
         // Periodic keep-alive pulse to maintain WebSocket and background timers
+        // Briefly holds wake lock for 2s only during pulse so SoC CPU can enter deep sleep
         pulseJob?.cancel()
         pulseJob = serviceScope.launch {
             while (isActive) {
-                delay(25_000L)
+                delay(40_000L)
                 try {
+                    wakeLock?.acquire(2_000L)
                     onPulseListener?.invoke()
                 } catch (ignored: Exception) {}
             }

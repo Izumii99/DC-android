@@ -6,21 +6,27 @@ import android.webkit.WebView
 
 object MemoryOptimizer {
 
-    // Throttles animations, requestAnimationFrame to 1 FPS, and heavy media when backgrounded
+    // Throttles animations, disables WebRTC video tracks to halt GPU decoding, and pauses media when backgrounded
     private const val THROTTLE_ANIMATIONS_SCRIPT = """
         (function() {
             window._dcIsBackground = true;
             if (!document.getElementById('dc-bg-style')) {
                 const style = document.createElement('style');
                 style.id = 'dc-bg-style';
-                style.innerHTML = '* { animation: none !important; transition: none !important; } canvas, img[src*=".gif"], [class*="animator"], [class*="mediaAttachments"], [class*="gif"], [class*="avatarDecoration"], [class*="profileEffects"], [class*="typing"] { display: none !important; } video { opacity: 0.01 !important; width: 1px !important; height: 1px !important; }';
+                style.innerHTML = '[class*="animator"], [class*="animated"], [class*="avatarDecoration"], [class*="profileEffects"], [class*="typing"], img[src*=".gif"], canvas { animation: none !important; display: none !important; }';
                 document.head.appendChild(style);
             }
             try {
                 const videos = document.querySelectorAll('video');
                 for (let i = 0; i < videos.length; i++) {
-                    if (videos[i].srcObject) continue;
-                    if (!videos[i].paused) {
+                    const stream = videos[i].srcObject;
+                    if (stream && stream.getVideoTracks) {
+                        const vTracks = stream.getVideoTracks();
+                        for (let t = 0; t < vTracks.length; t++) {
+                            vTracks[t]._dcWasEnabled = vTracks[t].enabled;
+                            vTracks[t].enabled = false;
+                        }
+                    } else if (!videos[i].paused) {
                         videos[i]._dcWasPlaying = true;
                         videos[i].pause();
                     }
@@ -53,8 +59,15 @@ object MemoryOptimizer {
             try {
                 const videos = document.querySelectorAll('video');
                 for (let i = 0; i < videos.length; i++) {
-                    if (videos[i].srcObject) continue;
-                    if (videos[i]._dcWasPlaying) {
+                    const stream = videos[i].srcObject;
+                    if (stream && stream.getVideoTracks) {
+                        const vTracks = stream.getVideoTracks();
+                        for (let t = 0; t < vTracks.length; t++) {
+                            if (vTracks[t]._dcWasEnabled !== false) {
+                                vTracks[t].enabled = true;
+                            }
+                        }
+                    } else if (videos[i]._dcWasPlaying) {
                         videos[i]._dcWasPlaying = false;
                         videos[i].play().catch(function() {});
                     }

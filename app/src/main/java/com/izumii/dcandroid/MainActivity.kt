@@ -495,6 +495,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         isAppInForeground = true
         webView?.keepAliveInBackground = false
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setupImmersiveFullscreen()
         MemoryOptimizer.onResume(webView)
         ConnectionKeeperService.onPulseListener = null
@@ -513,6 +514,7 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         isAppInForeground = false
         webView?.keepAliveInBackground = true
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         super.onPause()
         (getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager)?.mode =
             android.media.AudioManager.MODE_NORMAL
