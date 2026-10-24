@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">DC Android</string>
+    <string name="service_running_title">Discord Background Active</string>
+    <string name="service_running_desc">Voice session and connection retained</string>
+    <string name="exit_prompt">Press back again to exit</string>
+    <string name="open_with">Open with</string>
+</resources>
