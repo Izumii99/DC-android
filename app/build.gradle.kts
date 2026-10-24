@@ -17,6 +17,35 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    flavorDimensions += "mode"
+    productFlavors {
+        create("standard") {
+            dimension = "mode"
+            manifestPlaceholders["appName"] = "DC Android"
+            manifestPlaceholders["appIcon"] = "@drawable/ic_discord_logo"
+            manifestPlaceholders["roundIcon"] = "@drawable/ic_discord_logo"
+        }
+        create("discreet") {
+            dimension = "mode"
+            applicationIdSuffix = ".discreet"
+            manifestPlaceholders["appName"] = "DC"
+            manifestPlaceholders["appIcon"] = "@drawable/ic_transparent"
+            manifestPlaceholders["roundIcon"] = "@drawable/ic_transparent"
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            val keystore = file("signing/release.keystore")
+            if (keystore.exists()) {
+                storeFile = keystore
+                storePassword = "bc_release_key"
+                keyAlias = "bc_release"
+                keyPassword = "bc_release_key"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -25,6 +54,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storeFile != null) {
+                signingConfig = releaseSigning
+            }
         }
         debug {
             isMinifyEnabled = false

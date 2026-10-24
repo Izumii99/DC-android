@@ -8,7 +8,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -24,22 +23,22 @@ import kotlinx.coroutines.launch
 
 /**
  * Foreground Service that prevents Android and OEM battery managers (MIUI/HyperOS, OneUI)
- * from freezing CPU threads, Wi-Fi networking, or closing active Discord voice/chat sessions.
+ * from freezing CPU threads or closing active Discord voice/chat sessions.
  */
 class ConnectionKeeperService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
-    private var wifiLock: WifiManager.WifiLock? = null
     private var pulseJob: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
 
     companion object {
         private const val CHANNEL_ID = "dc_connection_keeper"
+        private const val CHAT_CHANNEL_ID = "dc_chat_notifications"
         private const val NOTIFICATION_ID = 2001
 
         var onPulseListener: (() -> Unit)? = null
 
-        fun buildNotification(context: Context): Notification {
+        fun buildNotification(context: Context, unreadCount: Int = 0): Notification {
             val launchIntent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
@@ -50,14 +49,63 @@ class ConnectionKeeperService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
             )
 
+            val isDiscreet = context.packageName.contains("discreet")
+            val baseTitle = if (isDiscreet) "DC" else "DC Android"
+            val title = if (unreadCount > 0) "$baseTitle ($unreadCount)" else (if (isDiscreet) baseTitle else context.getString(R.string.service_running_title))
+            val text = if (unreadCount > 0) {
+                if (isDiscreet) "$unreadCount new message${if (unreadCount > 1) "s" else ""}" else "$unreadCount new mention${if (unreadCount > 1) "s" else ""}"
+            } else {
+                if (isDiscreet) "Active session" else context.getString(R.string.service_running_desc)
+            }
+            val icon = if (isDiscreet) R.drawable.ic_transparent else R.drawable.ic_discord_logo
+
             return NotificationCompat.Builder(context, CHANNEL_ID)
-                .setContentTitle(context.getString(R.string.service_running_title))
-                .setContentText(context.getString(R.string.service_running_desc))
-                .setSmallIcon(R.drawable.ic_discord_logo)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setSmallIcon(icon)
                 .setOngoing(true)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setPriority(if (unreadCount > 0) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
+                .setContentIntent(pendingIntent)
+                .apply {
+                    if (unreadCount > 0) setNumber(unreadCount)
+                }
+                .build()
+        }
+
+        fun updateBadgeCount(context: Context, count: Int) {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            try {
+                manager.notify(NOTIFICATION_ID, buildNotification(context, count))
+            } catch (ignored: Exception) {}
+        }
+
+        fun showChatNotification(context: Context, title: String, message: String) {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            val launchIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                System.currentTimeMillis().toInt(),
+                launchIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+            )
+            val isDiscreet = context.packageName.contains("discreet")
+            val displayTitle = if (isDiscreet) "DC" else title
+            val icon = if (isDiscreet) R.drawable.ic_transparent else R.drawable.ic_discord_logo
+
+            val notif = NotificationCompat.Builder(context, CHAT_CHANNEL_ID)
+                .setContentTitle(displayTitle)
+                .setContentText(message)
+                .setSmallIcon(icon)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setContentIntent(pendingIntent)
                 .build()
+
+            try {
+                manager.notify((System.currentTimeMillis() % 10000).toInt() + 3000, notif)
+            } catch (ignored: Exception) {}
         }
 
         fun start(context: Context) {
@@ -87,38 +135,21 @@ class ConnectionKeeperService : Service() {
             setReferenceCounted(false)
             acquire(24 * 60 * 60 * 1000L) // 24-hour ceiling
         }
-
-        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-        val lockType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
-        } else {
-            @Suppress("DEPRECATION")
-            WifiManager.WIFI_MODE_FULL_HIGH_PERF
-        }
-        try {
-            wifiLock = wifiManager?.createWifiLock(lockType, "DCAndroid:ConnectionKeeperWifiLock")?.apply {
-                setReferenceCounted(false)
-                acquire()
-            }
-        } catch (ignored: Exception) {}
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = buildNotification(this)
+        val notification = buildNotification(this, 0)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val serviceTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            startForeground(NOTIFICATION_ID, notification, serviceTypes)
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
 
-        // Periodic keep-alive pulse to ensure network state stays warm
+        // Periodic keep-alive pulse to maintain WebSocket and background timers
         pulseJob?.cancel()
         pulseJob = serviceScope.launch {
             while (isActive) {
-                delay(15_000L)
+                delay(25_000L)
                 try {
                     onPulseListener?.invoke()
                 } catch (ignored: Exception) {}
@@ -133,16 +164,12 @@ class ConnectionKeeperService : Service() {
     override fun onDestroy() {
         pulseJob?.cancel()
         pulseJob = null
+        onPulseListener = null
 
         try {
             if (wakeLock?.isHeld == true) wakeLock?.release()
         } catch (ignored: Exception) {}
         wakeLock = null
-
-        try {
-            if (wifiLock?.isHeld == true) wifiLock?.release()
-        } catch (ignored: Exception) {}
-        wifiLock = null
 
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
@@ -150,7 +177,9 @@ class ConnectionKeeperService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            val manager = getSystemService(NotificationManager::class.java) ?: return
+
+            val keeperChannel = NotificationChannel(
                 CHANNEL_ID,
                 "Discord Connection Keeper",
                 NotificationManager.IMPORTANCE_LOW
@@ -158,8 +187,17 @@ class ConnectionKeeperService : Service() {
                 description = "Maintains Discord WebSocket and background audio/voice sessions"
                 setShowBadge(false)
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
+            manager.createNotificationChannel(keeperChannel)
+
+            val chatChannel = NotificationChannel(
+                CHAT_CHANNEL_ID,
+                "Discord Messages & Mentions",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Notifications for Discord DMs and mentions"
+                enableVibration(true)
+            }
+            manager.createNotificationChannel(chatChannel)
         }
     }
 }

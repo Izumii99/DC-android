@@ -9,26 +9,39 @@ Designed as a personal lightweight replacement for bloated mobile browsers (Chro
 ## Key Features
 
 - **24/7 Background Session Retention & Anti-Shutdown:**
-  - Integrated foreground service (`ConnectionKeeperService`) maintaining CPU wake lock (`PARTIAL_WAKE_LOCK`) and low-latency Wi-Fi lock (`WIFI_MODE_FULL_LOW_LATENCY`).
+  - Integrated foreground service (`ConnectionKeeperService`) maintaining CPU wake lock (`PARTIAL_WAKE_LOCK`) without battery-draining Wi-Fi locks.
   - Custom `KeepAliveWebView` intercepting `onWindowVisibilityChanged` to prevent Chromium's Blink rendering engine from freezing JavaScript timers, WebSockets, Gateway heartbeats, or WebRTC voice/streaming sessions when the screen turns off.
-- **Ultra-Low Memory Footprint:**
-  - Pure native WebView wrapper with zero browser chrome, tabs, or bloated browser extensions (~0.8 MB APK footprint).
-  - Idle RAM usage of **~45 MB – 75 MB** (compared to 500 MB – 800 MB on mobile Chrome).
+- **Ultra-Low Memory & Battery Footprint:**
+  - Pure native WebView wrapper with zero browser chrome, tabs, or bloated browser extensions (**~0.66 MB APK footprint**).
+  - Idle RAM usage of **~40 MB – 70 MB** (compared to 500 MB – 800 MB on mobile Chrome).
   - Active memory pruning via Android `onTrimMemory` hooks clears non-essential cache buffers during OS memory pressure without dropping active voice or chat sessions.
-  - Automatically throttles CSS animations and redraws when minimized or screen-locked to eliminate CPU heat and conserve battery.
-- **Desktop Web Client Spoofing:**
+  - Automatically throttles CSS animations and caps `requestAnimationFrame` down to **1 FPS** when minimized or screen-locked to eliminate CPU heat and conserve battery.
+- **HTML5 Desktop Notification Bridge:**
+  - Native polyfill for Web Notifications (`new Notification(title, { body })`) that routes Discord DMs and mentions straight into Android's native heads-up notification system.
+- **Discreet / Stealth Flavor:**
+  - Includes an optional discreet build variant with a minimal app name (`"DC"`), transparent launcher icon, and privacy notifications (`"Active session"` instead of revealing titles).
+- **Crash Auto-Recovery with Crash-Loop Guard:**
+  - Automatically recovers and restarts frozen or memory-exhausted WebKit render processes. If consecutive crashes exceed 3 within 30s, it clears corrupted session storage and notifies the user to prevent ANR crash-loops.
+- **Dynamic Notification Mention Badge:**
+  - Automatically parses Discord's unread mention counter from page titles and displays active mention counts (`(3) new mentions`) on the persistent keep-alive notification.
+- **Dynamic Pinch-to-Zoom & Viewport Adaptation:**
+  - Overrides viewport scaling constraints, allowing up to 5x pinch-to-zoom magnification across Discord desktop web UI for effortless readability on high-DPI mobile screens.
+- **Desktop Web Client Spoofing & Mobile Tweaks:**
   - Automatically injects modern Desktop Chrome User-Agent to bypass Discord's mobile redirect and load the full Discord Web app directly.
+  - Injects responsive mobile CSS tweaks to eliminate "Download the App" and "Better in App" nagging overlays.
 - **WebRTC Voice & Audio Integration:**
   - Native handling of `RECORD_AUDIO` and `WebChromeClient.onPermissionRequest` for voice channels and video streams.
+  - Web Audio Context lifecycle hooks keep audio output and input primed without freezing when switching apps.
   - Audio playback configured without requiring manual user touch gestures (`mediaPlaybackRequiresUserGesture = false`).
 - **Zero-Bar Immersive Edge-to-Edge:**
-  - Fullscreen display with transparent status and navigation bars.
+  - Fullscreen display with transparent status and navigation bars, reapplied seamlessly across orientation changes.
 - **Double-Tap Back Protection:**
   - Prevents accidental swipes or back presses from disconnecting your voice room or closing Discord.
-- **Native File Chooser Bridge:**
+- **Native File Chooser & Download Bridge:**
   - Full support for uploading pictures, files, and attachments into Discord chats directly from your phone's gallery or file manager.
+  - Full support for saving attachments, blobs, and media files directly into the Android Downloads directory.
 - **Native External Link Chooser:**
-  - Links sent in chat (YouTube, external websites, bug trackers) open via Android's native system app picker so your Discord voice room session is never disrupted.
+  - Links sent in chat (YouTube, Spotify, external websites, bug trackers) open via Android's native system app picker (with safe `intent://` scheme support) so your Discord voice room session is never disrupted.
 
 ---
 
@@ -54,16 +67,19 @@ DC-android/
 │   └── src/main/
 │       ├── AndroidManifest.xml
 │       ├── java/com/izumii/dcandroid/
-│       │   ├── DCApplication.kt           # Application setup & debug hooks
+│       │   ├── DCApplication.kt           # Application setup, DevTools, & onTrimMemory
 │       │   ├── KeepAliveWebView.kt        # Intercepts visibility to prevent Chromium freeze
-│       │   ├── MainActivity.kt            # WebSettings, Desktop UA, WebRTC permissions
+│       │   ├── MainActivity.kt            # WebSettings, Desktop UA, WebRTC, Zoom, AudioContext
+│       │   ├── WebAppInterface.kt         # JS bridge: downloads, clipboard, external chooser
 │       │   ├── memory/
-│       │   │   └── MemoryOptimizer.kt     # CSS throttle & onTrimMemory buffer pruning
+│       │   │   └── MemoryOptimizer.kt     # 1 FPS RAF throttle, GIF/media suppression, onTrimMemory
 │       │   └── service/
-│       │       └── ConnectionKeeperService.kt # Foreground service, WakeLock, WiFiLock
+│       │       └── ConnectionKeeperService.kt # Foreground service, WakeLock, badge counter
 │       └── res/
 │           ├── drawable/ic_discord_logo.xml
 │           ├── layout/activity_main.xml
+│           ├── xml/
+│           │   └── network_security_config.xml
 │           └── values/
 │               ├── colors.xml
 │               ├── strings.xml
@@ -82,15 +98,18 @@ DC-android/
 - JDK 17 or newer
 - Android SDK (API 34, Build Tools 34.0.0)
 
-### Command
+### Gradle Commands
 ```bash
-./gradlew assembleDebug
-# or for release:
-./gradlew assembleRelease
+# Debug build (Standard):
+./gradlew assembleStandardDebug
+
+# Release build (Standard & Discreet):
+./gradlew assembleStandardRelease assembleDiscreetRelease
 ```
 
-The output APK will be generated at:
-`app/build/outputs/apk/debug/app-debug.apk`
+The output APKs are saved in `publish/`:
+- `publish/DC-Android-Standard-Release.apk` (~0.66 MB)
+- `publish/DC-Android-Discreet-Release.apk` (~0.66 MB)
 
 ---
 

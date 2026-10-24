@@ -8,7 +8,10 @@ import android.os.Build
 import android.os.Bundle
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.CookieManager
 import android.webkit.PermissionRequest
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -29,7 +32,13 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var rootContainer: FrameLayout
     private var webView: KeepAliveWebView? = null
+    private var bridge: WebAppInterface? = null
     private var backPressedTime: Long = 0
+
+    private var recentCrashCount = 0
+    private var lastCrashTime = 0L
+    private var isAppInForeground = true
+    private var latestUnreadCount = 0
 
     private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
     private val fileChooserLauncher = registerForActivityResult(
@@ -42,7 +51,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         const val DISCORD_APP_URL = "https://discord.com/app"
-        // Desktop User-Agent prevents Discord from redirecting to Google Play Store mobile splash
+        // Desktop User-Agent prevents Discord from redirecting to mobile play store splash
         const val DESKTOP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
     }
 
@@ -109,8 +118,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun openExternalChooser(url: String): Boolean {
         return try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val intent = if (url.startsWith("intent://", ignoreCase = true)) {
+                Intent.parseUri(url, Intent.URI_INTENT_SCHEME).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            } else {
+                Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
             }
             val chooser = Intent.createChooser(intent, getString(R.string.open_with)).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -135,9 +150,25 @@ class MainActivity : AppCompatActivity() {
         }
         webView = v
 
+        val jsBridge = WebAppInterface(
+            context = this,
+            onZoomStateChanged = { enabled ->
+                webView?.let { wv ->
+                    wv.settings.setSupportZoom(enabled)
+                    wv.settings.builtInZoomControls = enabled
+                }
+            }
+        )
+        bridge = jsBridge
+        v.addJavascriptInterface(jsBridge, "AndroidBridge")
+
         v.setBackgroundColor(Color.parseColor("#1E1F22"))
         v.isFocusable = true
         v.isFocusableInTouchMode = true
+
+        val cookieManager = CookieManager.getInstance()
+        cookieManager.setAcceptCookie(true)
+        cookieManager.setAcceptThirdPartyCookies(v, true)
 
         val settings = v.settings
         settings.javaScriptEnabled = true
@@ -146,21 +177,61 @@ class MainActivity : AppCompatActivity() {
         settings.mediaPlaybackRequiresUserGesture = false
         settings.useWideViewPort = true
         settings.loadWithOverviewMode = true
-        settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         settings.cacheMode = WebSettings.LOAD_DEFAULT
         settings.setSupportZoom(true)
         settings.builtInZoomControls = true
         settings.displayZoomControls = false
         settings.allowFileAccess = true
+        settings.safeBrowsingEnabled = false
+        settings.setGeolocationEnabled(false)
 
         // Essential: Spoof desktop user agent so Discord loads the web app interface
         settings.userAgentString = DESKTOP_USER_AGENT
+
+        v.setDownloadListener { url, _, contentDisposition, mimetype, _ ->
+            val guessedName = URLUtil.guessFileName(url, contentDisposition, mimetype)
+            if (url.startsWith("data:")) {
+                jsBridge.saveBase64File(url, guessedName, mimetype)
+            } else if (url.startsWith("blob:")) {
+                val js = """
+                    (function() {
+                        fetch('$url')
+                            .then(function(r) { return r.blob(); })
+                            .then(function(b) {
+                                const reader = new FileReader();
+                                reader.onloadend = function() {
+                                    if (window.AndroidBridge && typeof window.AndroidBridge.saveBase64File === 'function') {
+                                        window.AndroidBridge.saveBase64File(reader.result, '$guessedName', b.type || '$mimetype');
+                                    }
+                                };
+                                reader.readAsDataURL(b);
+                            }).catch(function() {});
+                    })();
+                """.trimIndent()
+                v.evaluateJavascript(js, null)
+            } else {
+                jsBridge.downloadHttpFile(url, guessedName, mimetype)
+            }
+        }
 
         v.webChromeClient = object : WebChromeClient() {
             // Automatically grant WebRTC camera & microphone permissions when requested by Discord
             override fun onPermissionRequest(request: PermissionRequest?) {
                 runOnUiThread {
                     request?.grant(request.resources)
+                }
+            }
+
+            override fun onReceivedTitle(view: WebView?, title: String?) {
+                super.onReceivedTitle(view, title)
+                val count = title?.let {
+                    val match = Regex("""^\((\d+)\)""").find(it)
+                    match?.groupValues?.get(1)?.toIntOrNull()
+                } ?: 0
+                latestUnreadCount = count
+                if (!isAppInForeground) {
+                    ConnectionKeeperService.updateBadgeCount(this@MainActivity, count)
                 }
             }
 
@@ -209,22 +280,139 @@ class MainActivity : AppCompatActivity() {
                 openExternalChooser(url)
                 return true
             }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                // Inject AudioContext hook, HTML5 Notification bridge, pinch-to-zoom unlock, and Discord mobile cleanup
+                view?.evaluateJavascript(
+                    """
+                    (function() {
+                        if (!window._dcAudioCtxHooked) {
+                            window._dcAudioCtxHooked = true;
+                            const orig = window.AudioContext || window.webkitAudioContext;
+                            if (orig) {
+                                window.AudioContext = function() {
+                                    const ctx = new orig();
+                                    window._dcAudioCtx = ctx;
+                                    return ctx;
+                                };
+                                window.AudioContext.prototype = orig.prototype;
+                            }
+                        }
+                        if (!window.Notification) {
+                            window.Notification = function(title, options) {
+                                this.title = title || 'Discord';
+                                this.body = (options && options.body) || '';
+                                this.onclick = null;
+                                this.onclose = null;
+                                if (window.AndroidBridge && typeof window.AndroidBridge.postNotification === 'function') {
+                                    window.AndroidBridge.postNotification(this.title, this.body);
+                                }
+                            };
+                            window.Notification.prototype.close = function() {
+                                if (typeof this.onclose === 'function') {
+                                    try { this.onclose(); } catch(e) {}
+                                }
+                            };
+                            window.Notification.prototype.addEventListener = function(type, listener) {
+                                if (type === 'click') this.onclick = listener;
+                                if (type === 'close') this.onclose = listener;
+                            };
+                            window.Notification.prototype.removeEventListener = function(type, listener) {
+                                if (type === 'click' && this.onclick === listener) this.onclick = null;
+                                if (type === 'close' && this.onclose === listener) this.onclose = null;
+                            };
+                            window.Notification.permission = 'granted';
+                            window.Notification.requestPermission = function() { return Promise.resolve('granted'); };
+                        }
+                        const vp = document.querySelector('meta[name="viewport"]');
+                        if (vp) {
+                            vp.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes');
+                        }
+                        if (!document.getElementById('dc-mobile-style')) {
+                            const s = document.createElement('style');
+                            s.id = 'dc-mobile-style';
+                            s.innerHTML = '[class*="notice"], [class*="downloadNotice"], [class*="mobileAppPromo"] { display: none !important; }';
+                            document.head.appendChild(s);
+                        }
+                    })();
+                    """.trimIndent(),
+                    null
+                )
+            }
+
+            override fun onRenderProcessGone(
+                view: WebView?,
+                detail: RenderProcessGoneDetail?
+            ): Boolean {
+                val now = System.currentTimeMillis()
+                if (now - lastCrashTime < 30_000) {
+                    recentCrashCount++
+                } else {
+                    recentCrashCount = 1
+                }
+                lastCrashTime = now
+
+                Toast.makeText(this@MainActivity, R.string.reloading_session, Toast.LENGTH_SHORT).show()
+
+                MemoryOptimizer.destroyWebView(webView)
+                webView = null
+
+                if (recentCrashCount > 3) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Excessive crashes detected. Resetting session cache...",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    try {
+                        android.webkit.WebStorage.getInstance().deleteAllData()
+                    } catch (ignored: Exception) {}
+                    recentCrashCount = 0
+                }
+
+                setupWebView()
+                webView?.loadUrl(DISCORD_APP_URL)
+                return true
+            }
         }
     }
 
     override fun onResume() {
         super.onResume()
+        isAppInForeground = true
         webView?.keepAliveInBackground = false
         setupImmersiveFullscreen()
         MemoryOptimizer.onResume(webView)
+        ConnectionKeeperService.onPulseListener = null
         ConnectionKeeperService.stop(this)
+        ConnectionKeeperService.updateBadgeCount(this, 0)
+
+        // Resume AudioContext if suspended
+        webView?.evaluateJavascript(
+            "try { if (window._dcAudioCtx && window._dcAudioCtx.state === 'suspended') window._dcAudioCtx.resume(); } catch(e){}",
+            null
+        )
     }
 
     override fun onPause() {
+        isAppInForeground = false
         webView?.keepAliveInBackground = true
         super.onPause()
+        try {
+            CookieManager.getInstance().flush()
+        } catch (ignored: Exception) {}
         MemoryOptimizer.onPause(webView)
+        // Keep WebSocket Gateway and AudioContext primed during background
+        ConnectionKeeperService.onPulseListener = {
+            webView?.post {
+                webView?.evaluateJavascript(
+                    "try { if (window._dcAudioCtx && window._dcAudioCtx.state === 'suspended') window._dcAudioCtx.resume(); } catch(e){}",
+                    null
+                )
+            }
+        }
         ConnectionKeeperService.start(this)
+        ConnectionKeeperService.updateBadgeCount(this, latestUnreadCount)
     }
 
     override fun onTrimMemory(level: Int) {
@@ -239,12 +427,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        setupImmersiveFullscreen()
+    }
+
     override fun onDestroy() {
         fileUploadCallback?.onReceiveValue(null)
         fileUploadCallback = null
+        ConnectionKeeperService.onPulseListener = null
         ConnectionKeeperService.stop(this)
         MemoryOptimizer.destroyWebView(webView)
         webView = null
+        bridge = null
         super.onDestroy()
     }
 }

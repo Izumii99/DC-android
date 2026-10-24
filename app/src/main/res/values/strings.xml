@@ -4,4 +4,9 @@
     <string name="service_running_desc">Voice session and connection retained</string>
     <string name="exit_prompt">Press back again to exit</string>
     <string name="open_with">Open with</string>
+    <string name="copied_to_clipboard">Copied to clipboard</string>
+    <string name="reloading_session">Recovering Discord session…</string>
+    <string name="download_started">Download started…</string>
+    <string name="download_completed">Saved to Downloads</string>
+    <string name="download_failed">Download failed</string>
 </resources>

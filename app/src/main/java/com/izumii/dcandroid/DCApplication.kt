@@ -1,10 +1,10 @@
 package com.izumii.dcandroid
 
 import android.app.Application
-import android.os.Build
+import android.content.ComponentCallbacks2
 import android.webkit.WebView
 
-class DCApplication : Application() {
+class DCApplication : Application(), ComponentCallbacks2 {
 
     override fun onCreate() {
         super.onCreate()
@@ -13,5 +13,17 @@ class DCApplication : Application() {
         if (BuildConfig.DEBUG) {
             WebView.setWebContentsDebuggingEnabled(true)
         }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {
+            System.gc()
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        System.gc()
     }
 }
