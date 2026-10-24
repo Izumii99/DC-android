@@ -552,22 +552,7 @@ class MainActivity : AppCompatActivity() {
         ConnectionKeeperService.onPulseListener = {
             webView?.post {
                 webView?.evaluateJavascript(
-                    """
-                    try {
-                        if (window._dcAudioCtx && window._dcAudioCtx.state === 'suspended') window._dcAudioCtx.resume();
-                        window.dispatchEvent(new Event('mousemove'));
-                        if (window._dcIsBackground) {
-                            const vids = document.querySelectorAll('video');
-                            for (let i = 0; i < vids.length; i++) {
-                                const s = vids[i].srcObject;
-                                if (s && s.getVideoTracks) {
-                                    const ts = s.getVideoTracks();
-                                    for (let j = 0; j < ts.length; j++) ts[j].enabled = false;
-                                }
-                            }
-                        }
-                    } catch(e){}
-                    """.trimIndent(),
+                    "try { if (window._dcAudioCtx && window._dcAudioCtx.state === 'suspended') window._dcAudioCtx.resume(); window.dispatchEvent(new Event('mousemove')); } catch(e){}",
                     null
                 )
             }
